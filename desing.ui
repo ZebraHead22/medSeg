@@ -607,7 +607,7 @@ color: white;
                  <number>0</number>
                 </property>
                 <item>
-                 <widget class="QWidget" name="widget_17" native="true">
+                 <widget class="QWidget" name="term_wi" native="true">
                   <layout class="QVBoxLayout" name="verticalLayout_13">
                    <property name="topMargin">
                     <number>0</number>
@@ -616,18 +616,17 @@ color: white;
                     <number>0</number>
                    </property>
                    <item>
-                    <widget class="QLabel" name="term">
+                    <widget class="QLabel" name="label_3">
                      <property name="font">
                       <font>
                        <family>.SF NS</family>
-                       <pointsize>14</pointsize>
                       </font>
                      </property>
                      <property name="styleSheet">
                       <string notr="true">QLabel {
-	background-color: rgb(0, 0, 0);	
-	color: rgba(33, 255, 128, 206);
-	border-radius : 5px;
+	border-radius: 5px;
+	background-color: rgb(0, 0, 0);
+	color: white;
 }</string>
                      </property>
                      <property name="text">
@@ -637,7 +636,7 @@ color: white;
                       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
                      </property>
                      <property name="margin">
-                      <number>11</number>
+                      <number>10</number>
                      </property>
                     </widget>
                    </item>

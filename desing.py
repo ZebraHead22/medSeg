@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '/Users/max/Documents/PythonProjects/Image_Processing/medSeg/desing.ui'
+# Form implementation generated from reading ui file '/Users/max/Yandex.Disk.localized/medSeg/desing.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.10
 #
@@ -238,26 +238,25 @@ class Ui_MainWindow(object):
         self.verticalLayout_7 = QtWidgets.QVBoxLayout(self.widget_12)
         self.verticalLayout_7.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout_7.setObjectName("verticalLayout_7")
-        self.widget_17 = QtWidgets.QWidget(self.widget_12)
-        self.widget_17.setObjectName("widget_17")
-        self.verticalLayout_13 = QtWidgets.QVBoxLayout(self.widget_17)
+        self.term_wi = QtWidgets.QWidget(self.widget_12)
+        self.term_wi.setObjectName("term_wi")
+        self.verticalLayout_13 = QtWidgets.QVBoxLayout(self.term_wi)
         self.verticalLayout_13.setContentsMargins(-1, 0, -1, 0)
         self.verticalLayout_13.setObjectName("verticalLayout_13")
-        self.term = QtWidgets.QLabel(self.widget_17)
+        self.label_3 = QtWidgets.QLabel(self.term_wi)
         font = QtGui.QFont()
         font.setFamily(".SF NS")
-        font.setPointSize(14)
-        self.term.setFont(font)
-        self.term.setStyleSheet("QLabel {\n"
-"    background-color: rgb(0, 0, 0);    \n"
-"    color: rgba(33, 255, 128, 206);\n"
-"    border-radius : 5px;\n"
+        self.label_3.setFont(font)
+        self.label_3.setStyleSheet("QLabel {\n"
+"    border-radius: 5px;\n"
+"    background-color: rgb(0, 0, 0);\n"
+"    color: white;\n"
 "}")
-        self.term.setText("")
-        self.term.setAlignment(QtCore.Qt.AlignLeading|QtCore.Qt.AlignLeft|QtCore.Qt.AlignTop)
-        self.term.setObjectName("term")
-        self.verticalLayout_13.addWidget(self.term)
-        self.verticalLayout_7.addWidget(self.widget_17)
+        self.label_3.setText("")
+        self.label_3.setAlignment(QtCore.Qt.AlignLeading|QtCore.Qt.AlignLeft|QtCore.Qt.AlignTop)
+        self.label_3.setObjectName("label_3")
+        self.verticalLayout_13.addWidget(self.label_3)
+        self.verticalLayout_7.addWidget(self.term_wi)
         self.verticalLayout_3.addWidget(self.widget_12)
         self.horizontalLayout_3.addWidget(self.widget_8)
         spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
