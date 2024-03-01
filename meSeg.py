@@ -22,8 +22,8 @@ class ExampleApp(QtWidgets.QMainWindow, desing.Ui_MainWindow):
         self.directory = None
         self.data = None
         self.statusBar.showMessage("Ready")
-        self.det_model = YOLO('models/det.pt')
-        self.seg_model = YOLO('models/seg.pt')
+        self.det_model = YOLO('main_models/det.pt')
+        self.seg_model = YOLO('main_models/seg.pt')
         self.ext_btn.clicked.connect(self.exit)
         self.browse_btn.clicked.connect(self.browse)
         self.process_btn.clicked.connect(self.process)
@@ -117,7 +117,7 @@ class ExampleApp(QtWidgets.QMainWindow, desing.Ui_MainWindow):
 
                     classes = {0: "mutant", 1: "wildtype"}
                             
-                    model = torch.load('mut_mod/model_EGFR.pt', map_location=torch.device('cpu'))
+                    model = torch.load('mutation_models/model_EGFR.pt', map_location=torch.device('cpu'))
                     model.eval()
 
                     device = 'cpu'
@@ -131,7 +131,7 @@ class ExampleApp(QtWidgets.QMainWindow, desing.Ui_MainWindow):
                     output = model(img).argmax(dim=1).to('cpu').numpy()  
                     self.EGFR_result = classes[output[0]]
 
-                    model = torch.load('mut_mod/model_KRAS.pt', map_location=torch.device('cpu'))
+                    model = torch.load('mutation_models/model_KRAS.pt', map_location=torch.device('cpu'))
                     model.eval()
 
                     device = 'cpu'
