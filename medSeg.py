@@ -34,7 +34,6 @@ class ExampleApp(QtWidgets.QMainWindow, desing.Ui_MainWindow):
         # Set combo box
         self.statusBar.showMessage("Ready")
 
-    # Def for folder changing
     def browse(self):
         self.listWidget.clear()
         self.comboBox.clear()
