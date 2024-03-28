@@ -15,7 +15,6 @@ from PIL import Image, ImageFile
 from torchvision import transforms
 
 
-
 class ExampleApp(QtWidgets.QMainWindow, desing.Ui_MainWindow):
 
     def __init__(self):
