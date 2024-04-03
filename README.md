@@ -14,5 +14,4 @@ In the folder with raw images, two folders will be created: segmented images and
 
 ## License
 
-LibreHardwareMonitor is free and open source software licensed under MIT. You can use it in private and commercial projects. Keep in mind that you must include a copy of the license in your project.
-
+Medical Segmentation (medSeg) is free and open source software licensed under MIT. You can use it in private and commercial projects. Keep in mind that you must include a copy of the license in your project.
