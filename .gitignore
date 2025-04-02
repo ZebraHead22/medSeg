@@ -4,3 +4,4 @@ main_models
 mutation_models
 other_models
 .DS_Store
+.venv
