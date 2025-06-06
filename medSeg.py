@@ -4,7 +4,7 @@ import os
 import sys
 import cv2
 import torch
-import desing
+import design
 import numpy as np
 from PIL import Image
 from mymodel import net
@@ -15,7 +15,7 @@ from PIL import Image, ImageFile
 from torchvision import transforms
 
 
-class ExampleApp(QtWidgets.QMainWindow, desing.Ui_MainWindow):
+class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
 
     def __init__(self):
         super().__init__()
