@@ -129,3 +129,24 @@ mutation_models/
   ├── model_EGFR.pt
   └── model_KRAS.pt
 ```
+
+## 🤝 Contributing & Citation
+
+We welcome contributions! Please cite our work if using this software:
+
+```bibtex
+@article{Shariaty2025,
+  title={AI-Driven Precision Oncology: 
+         Integrating Deep Learning, Radiomics, and Genomic Analysis 
+         for Enhanced Lung Cancer Diagnosis and Treatment},
+  author={Shariaty, Faridoddin and Pavlov, Vitalii and Baranov, Maksim},
+  journal={Signal, Image and Video Processing},
+  year={2025},
+  volume={19},
+  pages={3285--3296},
+  doi={10.1007/s11760-025-04244-y}
+}
+```
+
+[![Springer Nature](https://img.shields.io/badge/Published%20in-Springer_Nature-%2310A5D3?style=flat&logo=springer)](https://link.springer.com/article/10.1007/s11760-025-04244-y)  
+[📚 Read the full article on SpringerLink](https://link.springer.com/article/10.1007/s11760-025-04244-y)
