@@ -9,13 +9,13 @@ import numpy as np
 from PIL import Image
 from mymodel import net
 import SimpleITK as sitk
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 from ultralytics import YOLO
 from PyQt5.QtGui import QPixmap, QImage
 from PIL import Image, ImageFile
 from torchvision import transforms
 # from radiomics import featureextractor
-from PyQt5 import QtGui  # Добавьте этот импорт в начало файла
+
 import copy
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
@@ -27,8 +27,24 @@ import torchvision
 import glob
 import torch.nn.functional as F
 from torchvision import transforms
+import io
 
-
+# Класс для перенаправления вывода в терминал
+class StreamToTerminal(io.StringIO):
+    def __init__(self, terminal_widget):
+        super().__init__()
+        self.terminal_widget = terminal_widget
+        
+    def write(self, message):
+        super().write(message)
+        self.terminal_widget.append(message)
+        # Автоматическая прокрутка вниз
+        scrollbar = self.terminal_widget.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        QtWidgets.QApplication.processEvents()
+        
+    def flush(self):
+        pass
 
 class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
 
@@ -37,50 +53,76 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         self.setupUi(self)
         self.directory = os.getcwd()
         self.data = None
+        
+        # Заменяем QLabel на QTextEdit для терминала
+        self.term = QtWidgets.QTextEdit()
+        self.term.setStyleSheet("""
+            QTextEdit {
+                border-radius: 5px;
+                background-color: rgb(0, 0, 0);
+                color: white;
+                font-family: 'Courier New', monospace;
+                font-size: 10pt;
+            }
+        """)
+        self.term.setReadOnly(True)
+        
+        # Заменяем label_3 на term в layout
+        if hasattr(self, 'label_3'):
+            # Находим позицию label_3 в layout и заменяем его
+            layout = self.term_wi.layout()
+            if layout:
+                # Находим индекс label_3 в layout
+                for i in range(layout.count()):
+                    widget = layout.itemAt(i).widget()
+                    if widget == self.label_3:
+                        layout.removeWidget(self.label_3)
+                        self.label_3.deleteLater()
+                        layout.addWidget(self.term)
+                        break
+        
+        # Перенаправляем стандартный вывод
+        sys.stdout = StreamToTerminal(self.term)
+        sys.stderr = StreamToTerminal(self.term)
+        
+        print("Программа запущена")
+        print("Готов к работе...")
+        
         # There are define models
+        print("Загрузка моделей...")
         self.det_model = YOLO('main_models/det.pt')
         self.seg_model = YOLO('main_models/seg.pt')
+        
+        # Загружаем модель для Grad-CAM
+        self.egfr_gradcam_model = None
+        self.target_layers = None
+        
         # Setup buttons
         self.ext_btn.clicked.connect(self.exit)
         self.browse_btn.clicked.connect(self.browse)
         self.process_btn.clicked.connect(self.process)
         self.comboBox.activated.connect(self.update_image)
-        
-        # Подключаем сигнал чекбокса Grad-CAM
         self.grad_cam_checkBox.stateChanged.connect(self.update_image)
         
-        # Устанавливаем стиль для чекбокса
-        self.grad_cam_checkBox.setStyleSheet("""
-            QCheckBox {
-                color: white;
-                background-color: rgb(66, 71, 105);
-                border-radius: 5px;
-                padding: 5px;
-            }
-            QCheckBox::indicator {
-                width: 15px;
-                height: 15px;
-            }
-        """)
+        # Словари для хранения данных
+        self.XY_dict = {}
+        self.mutation_dict = {}
+        self.cropped_images_dict = {}  # Храним вырезанные области
+        self.original_cropped_dict = {}  # Храним оригинальные вырезанные области
         
         # Set combo box
         self.statusBar.showMessage("Ready")
-        self.bbox_dict = {}  # Словарь для хранения bounding box опухолей
-        # Инициализируем терминальное окно
-        self.term = self.label_3  # Используем label_3 как терминальное окно
 
     def browse(self):
         self.listWidget.clear()
         self.comboBox.clear()
-
         self.data_files = list()
+        self.cropped_images_dict.clear()
+        self.original_cropped_dict.clear()
 
         self.directory = str(
             QtWidgets.QFileDialog.getExistingDirectory(self, "Select Directory"))
         self.line_getcwd.setText('...'+str(self.directory)[-63:])
-        
-        # Вывод в терминальное окно
-        self.term.setText("Selected directory: " + self.directory)
         
         if self.directory:
             for file in os.listdir(self.directory):
@@ -93,50 +135,49 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                                 '...'+str(self.directory)[-24:]+'/'+file)
 
             self.comboBox.addItems(self.data_files)
-            # Вывод в терминальное окно
-            self.term.setText(f"Found {len(self.data_files)} images\n" + self.term.text())
-            
         self.statusBar.showMessage("Ready")
+        print(f"Выбрана директория: {self.directory}")
+        print(f"Найдено {len(self.data_files)} изображений")
 
     def process(self):
-        # Вывод в терминальное окно
-        self.term.setText("Starting processing...\n" + self.term.text())
+        print("\n" + "="*50)
+        print("Начало обработки изображений...")
+        print("="*50)
         
         self.XY_dict = {}
         self.mutation_dict = {}
-        self.bbox_dict = {}  # Очищаем словарь bounding box'ов
+        self.cropped_images_dict.clear()
+        self.original_cropped_dict.clear()
 
         self.path_det = self.directory + '/detected'
         if not os.path.exists(self.path_det):
             os.mkdir(self.path_det)
-            self.term.setText("Created 'detected' directory\n" + self.term.text())
 
         self.path_seg = self.directory + '/segmentated'
         if not os.path.exists(self.path_seg):
             os.mkdir(self.path_seg)
-            self.term.setText("Created 'segmentated' directory\n" + self.term.text())
 
         image_count = 0
-        processed_count = 0
-        
         for address, dirs, names in os.walk(self.directory):
             for name in names:
                 filename, file_extension = os.path.splitext(name)
                 if file_extension == ".jpg":
-                    image_count += 1
                     if name != '.DS_Store':
-                        # Вывод в терминальное окно
-                        self.term.setText(f"Processing image {image_count}: {name}\n" + self.term.text())
-                        QtWidgets.QApplication.processEvents()  # Обновляем интерфейс
-
+                        image_count += 1
+                        print(f"\nОбработка изображения {image_count}: {name}")
+                        
+                        # Детекция
+                        print("  - Детекция...")
                         results = self.det_model(self.directory+'/'+name)
-
+                        
                         for r in results:
                             im_array = r.plot()
                             im = Image.fromarray(im_array[..., ::-1])
                             im.save(self.path_det + '/' + filename +
                                     '_DET_result.png')
 
+                        # Сегментация
+                        print("  - Сегментация...")
                         im = cv2.imread(self.directory+'/'+name)
                         results = self.seg_model(im)
 
@@ -157,73 +198,37 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                                     (box[0][1]+box[0][3])/2)
                                 self.XY_dict[name] = [
                                     self.x_center, self.y_center]
-                                
-                                # Сохраняем bounding box для каждой опухоли
-                                x_min = int(box[0][0])
-                                y_min = int(box[0][1])
-                                x_max = int(box[0][2])
-                                y_max = int(box[0][3])
-                                
-                                # УВЕЛИЧИВАЕМ padding для большей области
-                                padding = 20  # Увеличили с 20 до 50
-                                height, width = im.shape[:2]
-                                x_min = max(0, x_min - padding)
-                                y_min = max(0, y_min - padding)
-                                x_max = min(width, x_max + padding)
-                                y_max = min(height, y_max + padding)
-                                
-                                # Сохраняем в словарь
-                                if name not in self.bbox_dict:
-                                    self.bbox_dict[name] = []
-                                self.bbox_dict[name].append({
-                                    'x_min': x_min,
-                                    'y_min': y_min,
-                                    'x_max': x_max,
-                                    'y_max': y_max
-                                })
-                                
                             mask_raw = cv2.normalize(
                                 mask_raw, None, 255, 0, cv2.NORM_MINMAX, cv2.CV_8U)
                             contours, _ = cv2.findContours(
                                 mask_raw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                            # СДЕЛАЛИ ОБВОДКУ ТОНЬШЕ (1 вместо 2)
-                            cv2.drawContours(im, contours, -1, (0, 255, 0), 1)
-                            
-                            # Сохраняем оригинальное изображение с контуром
-                            cv2.imwrite(str(self.path_seg) + '/' +
-                                        filename + '_masked_full.png', im)
-                            
-                            # Создаем и сохраняем вырезанные области для каждой опухоли
-                            if name in self.bbox_dict:
-                                for i, bbox in enumerate(self.bbox_dict[name]):
-                                    # Вырезаем область опухоли
-                                    tumor_region = im[bbox['y_min']:bbox['y_max'], 
-                                                     bbox['x_min']:bbox['x_max']]
-                                    
-                                    # Сохраняем вырезанную область
-                                    if len(self.bbox_dict[name]) == 1:
-                                        # Если опухоль одна, сохраняем с обычным именем
-                                        cv2.imwrite(str(self.path_seg) + '/' +
-                                                    filename + '_masked.png', tumor_region)
-                                    else:
-                                        # Если опухолей несколько, сохраняем с индексом
-                                        cv2.imwrite(str(self.path_seg) + '/' +
-                                                    filename + f'_masked_{i}.png', tumor_region)
-                            
+                            cv2.drawContours(im, contours, -1, (0, 255, 0), 2)
                             # Save as mask
                             cv2.imwrite(str(self.path_seg) + '/' +
                                         filename + '_mask.png', mask_raw)
+                            # Save masked for showing
+                            cv2.imwrite(str(self.path_seg) + '/' +
+                                        filename + '_masked.png', im)
+                            
+                            print(f"    Найдена мутация в координатах: X={self.x_center}, Y={self.y_center}")
 
+                        # Вырезаем область вокруг мутации
                         half_width, half_height = 64, 64
-                        # Center is determined in get_mask, here x of the center and y of the center should be
                         start_x = int(max(self.x_center - half_width, 0))
                         start_y = int(max(self.y_center - half_height, 0))
                         end_x = int(start_x + 2*half_width)
                         end_y = int(start_y + 2*half_height)
                         frame = cv2.imread(self.directory+'/'+name)
 
-                        # This is the main image CT
-                        img = frame[start_y:end_y, start_x:end_x, :]
+                        # Это основное изображение CT
+                        img_cropped = frame[start_y:end_y, start_x:end_x, :]
+                        
+                        # Сохраняем оригинальную вырезанную область
+                        self.original_cropped_dict[name] = img_cropped.copy()
+                        
+                        # Преобразуем BGR в RGB для отображения
+                        img_cropped_rgb = cv2.cvtColor(img_cropped, cv2.COLOR_BGR2RGB)
+                        self.cropped_images_dict[name] = img_cropped_rgb
 
                         Resolution = (256, 256)
                         preprocess = transforms.Compose(
@@ -237,215 +242,228 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
 
                         classes = {0: "mutant", 1: "wildtype"}
 
+                        # Анализ EGFR
+                        print("  - Анализ EGFR...")
                         model = torch.load(
                             'mutation_models/model_EGFR.pt', map_location=torch.device('cpu'), weights_only=False)
                         model.eval()
 
                         device = 'cpu'
 
-                        if isinstance(img, np.ndarray):
-                            if img.dtype != np.uint8:
-                                img = img.astype(np.uint8)
-                            img = Image.fromarray(img)
+                        if isinstance(img_cropped, np.ndarray):
+                            if img_cropped.dtype != np.uint8:
+                                img_cropped = img_cropped.astype(np.uint8)
+                            img_pil = Image.fromarray(cv2.cvtColor(img_cropped, cv2.COLOR_BGR2RGB))
 
-                        img = preprocess(img).unsqueeze(0).to(device)
-                        output = model(img).argmax(dim=1).to('cpu').numpy()
+                        img_tensor = preprocess(img_pil).unsqueeze(0).to(device)
+                        output = model(img_tensor).argmax(dim=1).to('cpu').numpy()
                         self.EGFR_result = classes[output[0]]
+                        
+                        print(f"    Результат EGFR: {self.EGFR_result}")
 
+                        # Анализ KRAS
+                        print("  - Анализ KRAS...")
                         model = torch.load(
                             'mutation_models/model_KRAS.pt', map_location=torch.device('cpu'), weights_only=False)
                         model.eval()
 
-                        device = 'cpu'
-
-                        output = model(img).argmax(dim=1).to('cpu').numpy()
+                        output = model(img_tensor).argmax(dim=1).to('cpu').numpy()
                         self.KRAS_result = classes[output[0]]
+                        
+                        print(f"    Результат KRAS: {self.KRAS_result}")
+                        
                         self.mutation_dict[name] = [
                             self.EGFR_result, self.KRAS_result]
                         
-                        processed_count += 1
-                        # Вывод в терминальное окно
-                        self.term.setText(f"Processed {processed_count}/{image_count} images\n" + self.term.text())
-                        QtWidgets.QApplication.processEvents()  # Обновляем интерфейс
+                        # Сохраняем вырезанную область
+                        cropped_save_path = os.path.join(self.path_seg, f"{filename}_cropped.png")
+                        cv2.imwrite(cropped_save_path, img_cropped)
+                        
+                        print(f"  ✓ Изображение обработано")
 
-        # Вывод в терминальное окно
-        self.term.setText(f"✅ Processing complete!\nProcessed {processed_count} out of {image_count} images\n" + self.term.text())
-        self.statusBar.showMessage(f"Images saved ({processed_count} processed)")
+        print("\n" + "="*50)
+        print(f"Обработка завершена! Обработано изображений: {image_count}")
+        print("="*50)
+        self.statusBar.showMessage("Images saved")
 
-    def create_grad_cam(self, image_path, model_path='mutation_models/model_EGFR.pt'):
-        """
-        Создает тепловую карту Grad-CAM для изображения
-        """
+    def get_gradcam_for_image(self, img_cropped):
+        """Генерация Grad-CAM для вырезанной области"""
         try:
-            # Используем вырезанную область опухоли, а не все изображение
-            # Получаем путь к вырезанной области опухоли
-            filename = os.path.splitext(os.path.basename(image_path))[0]
-            tumor_image_path = str(self.path_seg) + '/' + filename + '_masked.png'
+            # Если модель еще не загружена, загружаем
+            if self.egfr_gradcam_model is None:
+                print("Загрузка модели для Grad-CAM...")
+                self.egfr_gradcam_model = torch.load(
+                    'mutation_models/model_EGFR.pt', 
+                    map_location=torch.device('cpu'), 
+                    weights_only=False
+                )
+                self.egfr_gradcam_model.eval()
+                
+                # Определяем целевые слои (зависит от архитектуры модели)
+                # Если это ResNet
+                if hasattr(self.egfr_gradcam_model, 'layer4'):
+                    self.target_layers = [self.egfr_gradcam_model.layer4[-1]]
+                # Если это другая архитектура, попробуем найти подходящие слои
+                else:
+                    # Ищем последний сверточный слой
+                    target_layers = []
+                    for name, module in self.egfr_gradcam_model.named_modules():
+                        if isinstance(module, torch.nn.Conv2d):
+                            target_layers.append(module)
+                    if target_layers:
+                        self.target_layers = [target_layers[-1]]
+                    else:
+                        print("Не удалось найти подходящие слои для Grad-CAM")
+                        return None
             
-            if not os.path.exists(tumor_image_path):
-                # Ищем другие варианты
-                for i in range(10):
-                    alt_path = str(self.path_seg) + '/' + filename + f'_masked_{i}.png'
-                    if os.path.exists(alt_path):
-                        tumor_image_path = alt_path
-                        break
-            
-            if not os.path.exists(tumor_image_path):
-                # Если нет вырезанной области, используем полное изображение
-                self.term.setText("Using full image for Grad-CAM (no tumor region found)\n" + self.term.text())
-                tumor_image_path = str(self.path_seg) + '/' + filename + '_masked_full.png'
-                if not os.path.exists(tumor_image_path):
-                    # Если нет и полного изображения, используем оригинал
-                    tumor_image_path = image_path
-            
-            # Загружаем изображение
-            rgb_img = Image.open(tumor_image_path).convert('RGB')
-            
-            # Определяем размер для модели (должен совпадать с размером, на котором обучалась модель)
+            # Препроцессинг
             IMAGE_SIZE = (256, 256)
-            
-            # Определяем препроцессинг
             preprocess_transform = transforms.Compose([
                 transforms.Resize(IMAGE_SIZE),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                    std=[0.229, 0.224, 0.225])
+                                   std=[0.229, 0.224, 0.225])
             ])
             
-            # Преобразуем изображение
+            # Конвертируем numpy array в PIL Image
+            if isinstance(img_cropped, np.ndarray):
+                img_cropped_rgb = cv2.cvtColor(img_cropped, cv2.COLOR_BGR2RGB)
+                rgb_img = Image.fromarray(img_cropped_rgb).convert('RGB')
+            else:
+                rgb_img = img_cropped.convert('RGB')
+            
+            # Подготавливаем входные данные
             input_tensor = preprocess_transform(rgb_img).unsqueeze(0)
             
-            # Загружаем модель
-            model = torch.load(model_path, map_location=torch.device('cpu'), weights_only=False)
-            model.eval()
-            
-            # Определяем target_layers (зависит от архитектуры модели)
-            # Для стандартных ResNet моделей:
-            if hasattr(model, 'layer4'):
-                target_layers = [model.layer4[-1]]
-            else:
-                # Ищем последний сверточный слой
-                for module in reversed(list(model.modules())):
-                    if isinstance(module, nn.Conv2d):
-                        target_layers = [module]
-                        break
-            
             # Создаем Grad-CAM
-            cam = GradCAM(model=model, target_layers=target_layers)
+            cam = GradCAM(model=self.egfr_gradcam_model, 
+                         target_layers=self.target_layers)
+            
+            # Генерируем тепловую карту
             grayscale_cam = cam(input_tensor=input_tensor)
             grayscale_cam = grayscale_cam[0, :]
             
-            # Преобразуем оригинальное изображение для визуализации
+            # Преобразуем исходное изображение для наложения
             rgb_img_np = np.array(rgb_img.resize(IMAGE_SIZE)) / 255.0
             
             # Создаем визуализацию
             visualization = show_cam_on_image(rgb_img_np, grayscale_cam, use_rgb=True)
             
-            # Конвертируем в формат для отображения в QLabel
+            # Конвертируем обратно в BGR для OpenCV
             visualization_bgr = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
+            
             return visualization_bgr
-        
+            
         except Exception as e:
-            error_msg = f"Error creating Grad-CAM: {e}"
-            print(error_msg)
-            self.term.setText(error_msg + "\n" + self.term.text())
+            print(f"Ошибка при создании Grad-CAM: {str(e)}")
             return None
-        
 
     def update_image(self):
-        # self.term.clear()
-
-        self.filename_changed_file, self.file_extension_changed_file = os.path.splitext(
-            str(self.comboBox.currentText()))
+        current_file = str(self.comboBox.currentText())
+        if not current_file:
+            return
+            
+        self.filename_changed_file, self.file_extension_changed_file = os.path.splitext(current_file)
         
-        # Загружаем исходное изображение
-        current_image_path = self.directory + '/' + self.filename_changed_file + '.jpg'
+        # Отображаем исходное изображение
         self.raw_image.setPixmap(
-            QPixmap(current_image_path))
+            QPixmap(self.directory+'/'+self.filename_changed_file+'.jpg'))
         
         try:
-            # Загружаем детекцию
+            # Отображаем детектированное изображение
             self.mask_l.setPixmap(QPixmap(self.path_det + '/' + self.filename_changed_file +
-                                        '_DET_result.png'))
+                                          '_DET_result.png'))
             
-            # ПРОВЕРЯЕМ ЧЕКБОКС GRAD-CAM
-            if self.grad_cam_checkBox.isChecked():
-                # Если чекбокс включен, создаем и показываем Grad-CAM
-                self.term.setText("Creating Grad-CAM visualization...\n" + self.term.text())
-                grad_cam_image = self.create_grad_cam(current_image_path)
+            # Проверяем, есть ли вырезанная область
+            if current_file in self.cropped_images_dict:
+                img_cropped = self.cropped_images_dict[current_file]
                 
-                if grad_cam_image is not None:
-                    # Конвертируем numpy array в QImage
-                    height, width, channel = grad_cam_image.shape
-                    bytes_per_line = 3 * width
+                # Проверяем состояние чекбокса Grad-CAM
+                if self.grad_cam_checkBox.isChecked():
+                    print(f"Генерация Grad-CAM для {current_file}...")
                     
-                    # Исправляем формат - используем RGB вместо BGR
-                    grad_cam_rgb = cv2.cvtColor(grad_cam_image, cv2.COLOR_BGR2RGB)
-                    q_img = QImage(grad_cam_rgb.data, width, height, 
-                                  bytes_per_line, QImage.Format_RGB888)
-                    pixmap = QPixmap.fromImage(q_img)
-                    self.segm_l.setPixmap(pixmap)
-                    self.term.setText("Showing Grad-CAM visualization\n" + self.term.text())
+                    # Получаем оригинальную вырезанную область (BGR)
+                    original_cropped = self.original_cropped_dict.get(current_file)
+                    if original_cropped is not None:
+                        # Генерируем Grad-CAM
+                        gradcam_result = self.get_gradcam_for_image(original_cropped)
+                        
+                        if gradcam_result is not None:
+                            # Конвертируем в QPixmap
+                            height, width, channel = gradcam_result.shape
+                            bytes_per_line = 3 * width
+                            q_img = QImage(gradcam_result.data, width, height, 
+                                          bytes_per_line, QImage.Format_RGB888)
+                            pixmap = QPixmap.fromImage(q_img.rgbSwapped())  # RGB -> BGR
+                            
+                            # Масштабируем для отображения
+                            scaled_pixmap = pixmap.scaled(self.segm_l.size(), 
+                                                         QtCore.Qt.KeepAspectRatio,
+                                                         QtCore.Qt.SmoothTransformation)
+                            self.segm_l.setPixmap(scaled_pixmap)
+                            print("✓ Grad-CAM сгенерирован")
+                        else:
+                            # Если Grad-CAM не удалось, показываем обычное изображение
+                            self.show_cropped_image(img_cropped)
+                    else:
+                        self.show_cropped_image(img_cropped)
                 else:
-                    # Если Grad-CAM не удалось создать, показываем обычное изображение
-                    self.show_segmentation_image()
+                    # Если чекбокс выключен, показываем обычную вырезанную область
+                    self.show_cropped_image(img_cropped)
             else:
-                # Если чекбокс выключен, показываем обычное изображение
-                self.show_segmentation_image()
+                # Пытаемся показать сегментированное изображение
+                segm_path = str(self.path_seg) + '/' + self.filename_changed_file + '_masked.png'
+                if os.path.exists(segm_path):
+                    self.segm_l.setPixmap(QPixmap(segm_path))
             
-            # Обновляем координаты и мутации
-            self.update_coordinates_and_mutations()
-            
-        except AttributeError:
-            self.term.setText(
-                "medSeg ~ % The mask, segmented images and parameters\nmedSeg ~ % will be displayed after processing")
+            # Обновляем координаты
+            if current_file in self.XY_dict:
+                self.x_loc_label.setText(
+                    str(self.XY_dict[current_file][0]))
+                self.y_loc_label.setText(
+                    str(self.XY_dict[current_file][1]))
+
+            # Обновляем результаты мутаций
+            if current_file in self.mutation_dict:
+                self.kras_label.setText(
+                    str(self.mutation_dict[current_file][1]))
+                self.egfr_label.setText(
+                    str(self.mutation_dict[current_file][0]))
+                
+        except AttributeError as e:
+            error_msg = f"medSeg ~ % The mask, segmented images and parameters\nmedSeg ~ % will be displayed after processing\nОшибка: {str(e)}"
+            self.term.append(error_msg)
+            print(error_msg)
         except Exception as e:
-            self.term.setText(f"Error updating image: {str(e)}\n" + self.term.text())
+            error_msg = f"Ошибка при обновлении изображения: {str(e)}"
+            self.term.append(error_msg)
+            print(error_msg)
 
-    def show_segmentation_image(self):
-        """Показывает обычное изображение с сегментацией"""
-        # Проверяем, есть ли вырезанная область опухоли
-        tumor_image_path = str(self.path_seg) + '/' + self.filename_changed_file + '_masked.png'
-        
-        if os.path.exists(tumor_image_path):
-            # Если есть вырезанная область, показываем ее
-            self.segm_l.setPixmap(QPixmap(tumor_image_path))
-        else:
-            # Ищем другие варианты (если опухолей несколько)
-            found = False
-            for i in range(10):  # Проверяем до 10 возможных опухолей
-                alt_path = str(self.path_seg) + '/' + self.filename_changed_file + f'_masked_{i}.png'
-                if os.path.exists(alt_path):
-                    self.segm_l.setPixmap(QPixmap(alt_path))
-                    found = True
-                    break
+    def show_cropped_image(self, img_cropped):
+        """Отображение вырезанной области"""
+        if isinstance(img_cropped, np.ndarray):
+            # Конвертируем numpy array в QPixmap
+            height, width, channel = img_cropped.shape
+            bytes_per_line = 3 * width
             
-            if not found:
-                # Если нет вырезанных областей, показываем полное изображение
-                full_image_path = str(self.path_seg) + '/' + self.filename_changed_file + '_masked_full.png'
-                if os.path.exists(full_image_path):
-                    self.segm_l.setPixmap(QPixmap(full_image_path))
-                else:
-                    self.segm_l.clear()
-
-    def update_coordinates_and_mutations(self):
-        """Обновляет координаты и мутации"""
-        current_image = self.comboBox.currentText()
-        
-        if current_image in self.XY_dict:
-            self.x_loc_label.setText(str(self.XY_dict[current_image][0]))
-            self.y_loc_label.setText(str(self.XY_dict[current_image][1]))
-            self.term.setText(f"Tumor center: X={self.XY_dict[current_image][0]}, Y={self.XY_dict[current_image][1]}\n" + self.term.text())
-        
-        if current_image in self.mutation_dict:
-            self.kras_label.setText(str(self.mutation_dict[current_image][1]))
-            self.egfr_label.setText(str(self.mutation_dict[current_image][0]))
-            self.term.setText(f"EGFR: {self.mutation_dict[current_image][0]}, KRAS: {self.mutation_dict[current_image][1]}\n" + self.term.text())
+            # Проверяем формат
+            if img_cropped.dtype != np.uint8:
+                img_cropped = img_cropped.astype(np.uint8)
+            
+            # Создаем QImage
+            q_img = QImage(img_cropped.data, width, height, 
+                          bytes_per_line, QImage.Format_RGB888)
+            
+            # Создаем QPixmap и масштабируем
+            pixmap = QPixmap.fromImage(q_img)
+            scaled_pixmap = pixmap.scaled(self.segm_l.size(), 
+                                         QtCore.Qt.KeepAspectRatio,
+                                         QtCore.Qt.SmoothTransformation)
+            self.segm_l.setPixmap(scaled_pixmap)
 
     def exit(self):
-        # Вывод в терминальное окно
-        self.term.setText("Exiting application...\n" + self.term.text())
-        QtWidgets.QApplication.quit()
+        print("Завершение работы программы...")
+        self.close()
 
 
 def main():
