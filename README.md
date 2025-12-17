@@ -169,6 +169,6 @@ We welcome contributions! Please cite our work if using this software:
 ```
 
 [![Springer Nature](https://img.shields.io/badge/Published%20in-Springer_Nature-%2310A5D3?style=flat&logo=springer)](https://link.springer.com/article/10.1007/s11760-025-04244-y)  
-[📚 Read the full article on SpringerLink](https://link.springer.com/article/10.1007/s11760-025-04244.y)
+[📚 Read the full article on SpringerLink](https://link.springer.com/article/10.1007/s11760-025-04244-y)
 
 **Note:** Large model files are not included in the Git repository. Please download them from the link provided in the Installation section and place them in the appropriate directories as shown in the project structure.
