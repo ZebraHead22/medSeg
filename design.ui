@@ -904,6 +904,40 @@ QComboBox::down-arrow {
                        </spacer>
                       </item>
                       <item>
+                       <widget class="QWidget" name="widget_17" native="true">
+                        <property name="minimumSize">
+                         <size>
+                          <width>110</width>
+                          <height>30</height>
+                         </size>
+                        </property>
+                        <layout class="QVBoxLayout" name="verticalLayout_14">
+                         <property name="spacing">
+                          <number>0</number>
+                         </property>
+                         <property name="leftMargin">
+                          <number>0</number>
+                         </property>
+                         <property name="topMargin">
+                          <number>0</number>
+                         </property>
+                         <property name="rightMargin">
+                          <number>0</number>
+                         </property>
+                         <property name="bottomMargin">
+                          <number>0</number>
+                         </property>
+                         <item>
+                          <widget class="QCheckBox" name="grad_cam_checkBox">
+                           <property name="text">
+                            <string>GradCam</string>
+                           </property>
+                          </widget>
+                         </item>
+                        </layout>
+                       </widget>
+                      </item>
+                      <item>
                        <widget class="QPushButton" name="browse_btn">
                         <property name="minimumSize">
                          <size>
