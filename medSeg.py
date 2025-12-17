@@ -8,11 +8,26 @@ import design
 import numpy as np
 from PIL import Image
 from mymodel import net
+import SimpleITK as sitk
 from PyQt5 import QtWidgets
 from ultralytics import YOLO
 from PyQt5.QtGui import QPixmap
 from PIL import Image, ImageFile
 from torchvision import transforms
+# from radiomics import featureextractor
+
+import copy
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
+import numpy as np
+from PIL import Image
+import torch
+import torch.nn as nn
+import torchvision
+import glob
+import torch.nn.functional as F
+from torchvision import transforms
+
 
 
 class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
@@ -137,7 +152,7 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                     classes = {0: "mutant", 1: "wildtype"}
 
                     model = torch.load(
-                        'mutation_models/model_EGFR.pt', map_location=torch.device('cpu'))
+                        'mutation_models/model_EGFR.pt', map_location=torch.device('cpu'), weights_only=False)
                     model.eval()
 
                     device = 'cpu'
@@ -152,7 +167,7 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                     self.EGFR_result = classes[output[0]]
 
                     model = torch.load(
-                        'mutation_models/model_KRAS.pt', map_location=torch.device('cpu'))
+                        'mutation_models/model_KRAS.pt', map_location=torch.device('cpu'), weights_only=False)
                     model.eval()
 
                     device = 'cpu'
@@ -164,7 +179,7 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         self.statusBar.showMessage("Images saved")
 
     def update_image(self):
-        self.term.clear()
+        # self.term.clear()
 
         self.filename_changed_file, self.file_extension_changed_file = os.path.splitext(
             str(self.comboBox.currentText()))
@@ -191,6 +206,8 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
 
     def exit(self):
         exit()
+
+
 
 
 def main():

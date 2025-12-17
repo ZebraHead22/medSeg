@@ -1,7 +1,4 @@
-archive_1/*
-archive_2/*
-main_models
-mutation_models
-other_models
-.DS_Store
-.venv
+examples/
+__pycache__/
+main_models/
+mutation_models/

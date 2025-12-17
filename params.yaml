@@ -1,0 +1,23 @@
+# Settings for feature extraction
+setting:
+  binWidth: 25
+  resampledPixelSpacing: [1, 1, 1] # Укажите здесь желаемое разрешение, если нужна передискретизация
+  interpolator: 'sitkBSpline'
+
+# Enable all feature classes
+featureClass:
+  - shape
+  - firstorder
+  - glcm
+  - gldm
+  - glrlm
+  - glszm
+  - ngtdm
+
+# Enable all image types (original + derived)
+imageType:
+  Original: {}
+  Wavelet: {}
+  LoG:
+    # sigma: [1.0, 2.0, 3.0, 4.0, 5.0] # Можно указать разные значения сигмы
+    sigma: [3.0, 5.0]

@@ -1,0 +1,2 @@
+main_models/det.pt filter=lfs diff=lfs merge=lfs -text
+main_models/seg.pt filter=lfs diff=lfs merge=lfs -text
