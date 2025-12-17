@@ -40,7 +40,7 @@ class StreamToTerminal(io.StringIO):
         self.terminal_widget.append(message)
         # Автоматическая прокрутка вниз
         scrollbar = self.terminal_widget.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        scrollbar.setValue(scbar.maximum())
         QtWidgets.QApplication.processEvents()
         
     def flush(self):
@@ -108,7 +108,6 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         self.XY_dict = {}
         self.mutation_dict = {}
         self.cropped_images_dict = {}  # Храним вырезанные области
-        self.original_cropped_dict = {}  # Храним оригинальные вырезанные области
         
         # Set combo box
         self.statusBar.showMessage("Ready")
@@ -118,7 +117,6 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         self.comboBox.clear()
         self.data_files = list()
         self.cropped_images_dict.clear()
-        self.original_cropped_dict.clear()
 
         self.directory = str(
             QtWidgets.QFileDialog.getExistingDirectory(self, "Select Directory"))
@@ -139,6 +137,42 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         print(f"Выбрана директория: {self.directory}")
         print(f"Найдено {len(self.data_files)} изображений")
 
+    def extract_contour_region(self, image, mask, padding=10):
+        """Извлекает область вокруг контура с отступом"""
+        # Находим контуры на маске
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if len(contours) == 0:
+            # Если контуров нет, возвращаем центр изображения
+            height, width = image.shape[:2]
+            center_x, center_y = width // 2, height // 2
+            size = 128
+            start_x = max(center_x - size//2, 0)
+            start_y = max(center_y - size//2, 0)
+            end_x = min(start_x + size, width)
+            end_y = min(start_y + size, height)
+            return image[start_y:end_y, start_x:end_x], []
+        
+        # Берем самый большой контур
+        contour = max(contours, key=cv2.contourArea)
+        
+        # Получаем ограничивающий прямоугольник
+        x, y, w, h = cv2.boundingRect(contour)
+        
+        # Добавляем отступ
+        x = max(x - padding, 0)
+        y = max(y - padding, 0)
+        w = min(w + 2 * padding, image.shape[1] - x)
+        h = min(h + 2 * padding, image.shape[0] - y)
+        
+        # Вырезаем область
+        cropped = image[y:y+h, x:x+w]
+        
+        # Смещаем контур для вырезанной области
+        shifted_contour = contour - np.array([x, y])
+        
+        return cropped, [shifted_contour]
+
     def process(self):
         print("\n" + "="*50)
         print("Начало обработки изображений...")
@@ -147,7 +181,6 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         self.XY_dict = {}
         self.mutation_dict = {}
         self.cropped_images_dict.clear()
-        self.original_cropped_dict.clear()
 
         self.path_det = self.directory + '/detected'
         if not os.path.exists(self.path_det):
@@ -176,8 +209,6 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                             im.save(self.path_det + '/' + filename +
                                     '_DET_result.png')
 
-                        # Сегментация
-                        print("  - Сегментация...")
                         im = cv2.imread(self.directory+'/'+name)
                         results = self.seg_model(im)
 
@@ -212,23 +243,24 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                             
                             print(f"    Найдена мутация в координатах: X={self.x_center}, Y={self.y_center}")
 
-                        # Вырезаем область вокруг мутации
-                        half_width, half_height = 64, 64
-                        start_x = int(max(self.x_center - half_width, 0))
-                        start_y = int(max(self.y_center - half_height, 0))
-                        end_x = int(start_x + 2*half_width)
-                        end_y = int(start_y + 2*half_height)
+                        # ВАЖНО: Вырезаем область вокруг контура, а не прямоугольную область
                         frame = cv2.imread(self.directory+'/'+name)
-
-                        # Это основное изображение CT
-                        img_cropped = frame[start_y:end_y, start_x:end_x, :]
                         
-                        # Сохраняем оригинальную вырезанную область
-                        self.original_cropped_dict[name] = img_cropped.copy()
+                        # Извлекаем область вокруг контура мутации
+                        img_cropped, contour_cropped = self.extract_contour_region(frame, mask_raw, padding=15)
                         
-                        # Преобразуем BGR в RGB для отображения
-                        img_cropped_rgb = cv2.cvtColor(img_cropped, cv2.COLOR_BGR2RGB)
-                        self.cropped_images_dict[name] = img_cropped_rgb
+                        # Создаем копию для отображения с контуром
+                        img_with_contour = img_cropped.copy()
+                        
+                        # Рисуем контур на вырезанной области (если есть)
+                        if contour_cropped:
+                            cv2.drawContours(img_with_contour, contour_cropped, -1, (0, 255, 0), 2)
+                        
+                        # Сохраняем обе версии
+                        self.cropped_images_dict[name] = {
+                            'with_contour': cv2.cvtColor(img_with_contour, cv2.COLOR_BGR2RGB),  # С контуром
+                            'original': cv2.cvtColor(img_cropped, cv2.COLOR_BGR2RGB)  # Без контура для Grad-CAM
+                        }
 
                         Resolution = (256, 256)
                         preprocess = transforms.Compose(
@@ -242,8 +274,6 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
 
                         classes = {0: "mutant", 1: "wildtype"}
 
-                        # Анализ EGFR
-                        print("  - Анализ EGFR...")
                         model = torch.load(
                             'mutation_models/model_EGFR.pt', map_location=torch.device('cpu'), weights_only=False)
                         model.eval()
@@ -258,29 +288,25 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                         img_tensor = preprocess(img_pil).unsqueeze(0).to(device)
                         output = model(img_tensor).argmax(dim=1).to('cpu').numpy()
                         self.EGFR_result = classes[output[0]]
-                        
-                        print(f"    Результат EGFR: {self.EGFR_result}")
 
-                        # Анализ KRAS
-                        print("  - Анализ KRAS...")
                         model = torch.load(
                             'mutation_models/model_KRAS.pt', map_location=torch.device('cpu'), weights_only=False)
                         model.eval()
 
+                        device = 'cpu'
+
                         output = model(img_tensor).argmax(dim=1).to('cpu').numpy()
                         self.KRAS_result = classes[output[0]]
-                        
-                        print(f"    Результат KRAS: {self.KRAS_result}")
-                        
                         self.mutation_dict[name] = [
                             self.EGFR_result, self.KRAS_result]
                         
+                        print(f"    Результаты: EGFR={self.EGFR_result}, KRAS={self.KRAS_result}")
+                        
                         # Сохраняем вырезанную область
                         cropped_save_path = os.path.join(self.path_seg, f"{filename}_cropped.png")
-                        cv2.imwrite(cropped_save_path, img_cropped)
+                        cv2.imwrite(cropped_save_path, img_with_contour)
                         
                         print(f"  ✓ Изображение обработано")
-
         print("\n" + "="*50)
         print(f"Обработка завершена! Обработано изображений: {image_count}")
         print("="*50)
@@ -349,10 +375,7 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
             # Создаем визуализацию
             visualization = show_cam_on_image(rgb_img_np, grayscale_cam, use_rgb=True)
             
-            # Конвертируем обратно в BGR для OpenCV
-            visualization_bgr = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
-            
-            return visualization_bgr
+            return visualization
             
         except Exception as e:
             print(f"Ошибка при создании Grad-CAM: {str(e)}")
@@ -376,40 +399,40 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
             
             # Проверяем, есть ли вырезанная область
             if current_file in self.cropped_images_dict:
-                img_cropped = self.cropped_images_dict[current_file]
+                cropped_data = self.cropped_images_dict[current_file]
                 
                 # Проверяем состояние чекбокса Grad-CAM
                 if self.grad_cam_checkBox.isChecked():
                     print(f"Генерация Grad-CAM для {current_file}...")
                     
-                    # Получаем оригинальную вырезанную область (BGR)
-                    original_cropped = self.original_cropped_dict.get(current_file)
-                    if original_cropped is not None:
-                        # Генерируем Grad-CAM
-                        gradcam_result = self.get_gradcam_for_image(original_cropped)
+                    # Получаем оригинальное вырезанное изображение (без контура)
+                    original_cropped_rgb = cropped_data['original']
+                    # Конвертируем RGB в BGR для Grad-CAM
+                    original_cropped_bgr = cv2.cvtColor(original_cropped_rgb, cv2.COLOR_RGB2BGR)
+                    
+                    # Генерируем Grad-CAM
+                    gradcam_result = self.get_gradcam_for_image(original_cropped_bgr)
+                    
+                    if gradcam_result is not None:
+                        # Конвертируем в QPixmap
+                        height, width, channel = gradcam_result.shape
+                        bytes_per_line = 3 * width
+                        q_img = QImage(gradcam_result.data, width, height, 
+                                      bytes_per_line, QImage.Format_RGB888)
+                        pixmap = QPixmap.fromImage(q_img)
                         
-                        if gradcam_result is not None:
-                            # Конвертируем в QPixmap
-                            height, width, channel = gradcam_result.shape
-                            bytes_per_line = 3 * width
-                            q_img = QImage(gradcam_result.data, width, height, 
-                                          bytes_per_line, QImage.Format_RGB888)
-                            pixmap = QPixmap.fromImage(q_img.rgbSwapped())  # RGB -> BGR
-                            
-                            # Масштабируем для отображения
-                            scaled_pixmap = pixmap.scaled(self.segm_l.size(), 
-                                                         QtCore.Qt.KeepAspectRatio,
-                                                         QtCore.Qt.SmoothTransformation)
-                            self.segm_l.setPixmap(scaled_pixmap)
-                            print("✓ Grad-CAM сгенерирован")
-                        else:
-                            # Если Grad-CAM не удалось, показываем обычное изображение
-                            self.show_cropped_image(img_cropped)
+                        # Масштабируем для отображения
+                        scaled_pixmap = pixmap.scaled(self.segm_l.size(), 
+                                                     QtCore.Qt.KeepAspectRatio,
+                                                     QtCore.Qt.SmoothTransformation)
+                        self.segm_l.setPixmap(scaled_pixmap)
+                        print("✓ Grad-CAM сгенерирован")
                     else:
-                        self.show_cropped_image(img_cropped)
+                        # Если Grad-CAM не удалось, показываем вырезанную область с контуром
+                        self.show_cropped_image(cropped_data['with_contour'])
                 else:
-                    # Если чекбокс выключен, показываем обычную вырезанную область
-                    self.show_cropped_image(img_cropped)
+                    # Если чекбокс выключен, показываем вырезанную область С КОНТУРОМ
+                    self.show_cropped_image(cropped_data['with_contour'])
             else:
                 # Пытаемся показать сегментированное изображение
                 segm_path = str(self.path_seg) + '/' + self.filename_changed_file + '_masked.png'
@@ -439,19 +462,19 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
             self.term.append(error_msg)
             print(error_msg)
 
-    def show_cropped_image(self, img_cropped):
+    def show_cropped_image(self, img_np):
         """Отображение вырезанной области"""
-        if isinstance(img_cropped, np.ndarray):
+        if isinstance(img_np, np.ndarray):
             # Конвертируем numpy array в QPixmap
-            height, width, channel = img_cropped.shape
+            height, width, channel = img_np.shape
             bytes_per_line = 3 * width
             
             # Проверяем формат
-            if img_cropped.dtype != np.uint8:
-                img_cropped = img_cropped.astype(np.uint8)
+            if img_np.dtype != np.uint8:
+                img_np = img_np.astype(np.uint8)
             
             # Создаем QImage
-            q_img = QImage(img_cropped.data, width, height, 
+            q_img = QImage(img_np.data, width, height, 
                           bytes_per_line, QImage.Format_RGB888)
             
             # Создаем QPixmap и масштабируем
