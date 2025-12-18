@@ -40,7 +40,7 @@ class StreamToTerminal(io.StringIO):
         self.terminal_widget.append(message)
         # Автоматическая прокрутка вниз
         scrollbar = self.terminal_widget.verticalScrollBar()
-        scrollbar.setValue(scbar.maximum())
+        scrollbar.setValue(scrollbar.maximum())
         QtWidgets.QApplication.processEvents()
         
     def flush(self):
@@ -53,6 +53,11 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         self.setupUi(self)
         self.directory = os.getcwd()
         self.data = None
+        
+        # Отключаем автоматическое масштабирование в QLabel
+        self.raw_image.setScaledContents(False)
+        self.mask_l.setScaledContents(False)
+        self.segm_l.setScaledContents(False)
         
         # Заменяем QLabel на QTextEdit для терминала
         self.term = QtWidgets.QTextEdit()
@@ -137,7 +142,7 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         print(f"Выбрана директория: {self.directory}")
         print(f"Найдено {len(self.data_files)} изображений")
 
-    def extract_contour_region(self, image, mask, padding=10):
+    def extract_contour_region(self, image, mask, padding=50):
         """Извлекает область вокруг контура с отступом"""
         # Находим контуры на маске
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -146,7 +151,7 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
             # Если контуров нет, возвращаем центр изображения
             height, width = image.shape[:2]
             center_x, center_y = width // 2, height // 2
-            size = 128
+            size = 256  # Уменьшенный размер
             start_x = max(center_x - size//2, 0)
             start_y = max(center_y - size//2, 0)
             end_x = min(start_x + size, width)
@@ -247,7 +252,7 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                         frame = cv2.imread(self.directory+'/'+name)
                         
                         # Извлекаем область вокруг контура мутации
-                        img_cropped, contour_cropped = self.extract_contour_region(frame, mask_raw, padding=15)
+                        img_cropped, contour_cropped = self.extract_contour_region(frame, mask_raw, padding=50)
                         
                         # Создаем копию для отображения с контуром
                         img_with_contour = img_cropped.copy()
@@ -389,13 +394,20 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
         self.filename_changed_file, self.file_extension_changed_file = os.path.splitext(current_file)
         
         # Отображаем исходное изображение
-        self.raw_image.setPixmap(
-            QPixmap(self.directory+'/'+self.filename_changed_file+'.jpg'))
+        raw_pixmap = QPixmap(self.directory+'/'+self.filename_changed_file+'.jpg')
+        scaled_raw_pixmap = raw_pixmap.scaled(self.raw_image.size(), 
+                                            QtCore.Qt.KeepAspectRatio,
+                                            QtCore.Qt.SmoothTransformation)
+        self.raw_image.setPixmap(scaled_raw_pixmap)
         
         try:
             # Отображаем детектированное изображение
-            self.mask_l.setPixmap(QPixmap(self.path_det + '/' + self.filename_changed_file +
-                                          '_DET_result.png'))
+            det_pixmap = QPixmap(self.path_det + '/' + self.filename_changed_file +
+                                '_DET_result.png')
+            scaled_det_pixmap = det_pixmap.scaled(self.mask_l.size(), 
+                                                QtCore.Qt.KeepAspectRatio,
+                                                QtCore.Qt.SmoothTransformation)
+            self.mask_l.setPixmap(scaled_det_pixmap)
             
             # Проверяем, есть ли вырезанная область
             if current_file in self.cropped_images_dict:
@@ -421,10 +433,8 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                                       bytes_per_line, QImage.Format_RGB888)
                         pixmap = QPixmap.fromImage(q_img)
                         
-                        # Масштабируем для отображения
-                        scaled_pixmap = pixmap.scaled(self.segm_l.size(), 
-                                                     QtCore.Qt.KeepAspectRatio,
-                                                     QtCore.Qt.SmoothTransformation)
+                        # Масштабируем с ограничением увеличения
+                        scaled_pixmap = self.scale_pixmap_to_fit(pixmap, self.segm_l.size())
                         self.segm_l.setPixmap(scaled_pixmap)
                         print("✓ Grad-CAM сгенерирован")
                     else:
@@ -437,7 +447,9 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
                 # Пытаемся показать сегментированное изображение
                 segm_path = str(self.path_seg) + '/' + self.filename_changed_file + '_masked.png'
                 if os.path.exists(segm_path):
-                    self.segm_l.setPixmap(QPixmap(segm_path))
+                    segm_pixmap = QPixmap(segm_path)
+                    scaled_segm_pixmap = self.scale_pixmap_to_fit(segm_pixmap, self.segm_l.size())
+                    self.segm_l.setPixmap(scaled_segm_pixmap)
             
             # Обновляем координаты
             if current_file in self.XY_dict:
@@ -462,8 +474,29 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
             self.term.append(error_msg)
             print(error_msg)
 
+    def scale_pixmap_to_fit(self, pixmap, target_size):
+        """Масштабирование пиксмапа для заполнения целевого размера с сохранением пропорций"""
+        original_size = pixmap.size()
+        target_width = target_size.width()
+        target_height = target_size.height()
+        
+        # Вычисляем коэффициенты масштабирования
+        scale_w = target_width / original_size.width()
+        scale_h = target_height / original_size.height()
+        
+        # Используем минимальный коэффициент, чтобы изображение поместилось целиком
+        scale = min(scale_w, scale_h)
+        
+        # Вычисляем новые размеры
+        new_width = int(original_size.width() * scale)
+        new_height = int(original_size.height() * scale)
+        
+        return pixmap.scaled(new_width, new_height, 
+                           QtCore.Qt.KeepAspectRatio,
+                           QtCore.Qt.SmoothTransformation)
+
     def show_cropped_image(self, img_np):
-        """Отображение вырезанной области"""
+        """Отображение вырезанной области с ограниченным увеличением"""
         if isinstance(img_np, np.ndarray):
             # Конвертируем numpy array в QPixmap
             height, width, channel = img_np.shape
@@ -477,11 +510,11 @@ class ExampleApp(QtWidgets.QMainWindow, design.Ui_MainWindow):
             q_img = QImage(img_np.data, width, height, 
                           bytes_per_line, QImage.Format_RGB888)
             
-            # Создаем QPixmap и масштабируем
+            # Создаем QPixmap
             pixmap = QPixmap.fromImage(q_img)
-            scaled_pixmap = pixmap.scaled(self.segm_l.size(), 
-                                         QtCore.Qt.KeepAspectRatio,
-                                         QtCore.Qt.SmoothTransformation)
+            
+            # Масштабируем для заполнения
+            scaled_pixmap = self.scale_pixmap_to_fit(pixmap, self.segm_l.size())
             self.segm_l.setPixmap(scaled_pixmap)
 
     def exit(self):
