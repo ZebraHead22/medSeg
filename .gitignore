@@ -3,3 +3,4 @@ __pycache__/
 main_models/
 mutation_models/
 .DS_Store
+.venv/
